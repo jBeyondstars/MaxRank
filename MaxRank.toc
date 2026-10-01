@@ -1,0 +1,11 @@
+## Interface: 16001
+## Title: MaxRank
+## Notes: Upgrades action bar spells to the highest rank you know, with a per-rank ignore list and a highlight of outdated buttons. Built for WoW Forever.
+## Author: jBeyondstars
+## Version: 1.0.0
+## SavedVariablesPerCharacter: MaxRankCharDB
+
+Core.lua
+Ranks.lua
+Overlays.lua
+SpellBookBar.lua
