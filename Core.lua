@@ -8,10 +8,12 @@ local ADDON, ns = ...
 
 local PREFIX = "|cffffc040MaxRank|r: "
 local UPGRADE_AFTER_COMBAT_DELAY = 0.5	-- seconds after combat before a queued update runs
+local AUTO_UPDATE_DELAY = 0.5			-- quiet time after the last spellbook change before automatic update looks at it
 
 local defaults = {
 	ignored = {},		-- [spellID] = true: exact ranks that are never upgraded, on any bar
 	showBar = true,		-- buttons under the spellbook
+	autoUpdate = false,	-- update the action bars by itself when a new rank is learned
 	sessions = 0,		-- load counter, shows in /maxrank status whether saved data survives a restart
 }
 
@@ -29,7 +31,8 @@ end
 
 -- Secret values (Forever combat restrictions) cannot be compared or used as keys: treat them as missing.
 function ns.Val(v)
-	if v ~= nil and issecretvalue and issecretvalue(v) then return nil end
+	if issecretvalue and issecretvalue(v) then return nil end
+	if canaccessvalue and not canaccessvalue(v) then return nil end
 	return v
 end
 
@@ -44,18 +47,36 @@ end
 -- Many events can ask for a refresh in the same frame; run it once, on the next frame,
 -- after Blizzard's own handlers have updated each button's action slot.
 local refreshQueued = false
+local refreshDirty = false
 
 local function RunRefresh()
 	refreshQueued = false
+	if refreshDirty then
+		refreshDirty = false
+		ns.MarkSpellbookDirty()
+	end
 	if not DB or not ns.supported then return end
 	ns.RefreshOverlays()
 	ns.RefreshSpellBookBar()
 end
 
-function ns.RequestRefresh()
+function ns.RequestRefresh(dirtySpellbook)
+	if dirtySpellbook then refreshDirty = true end
 	if refreshQueued then return end
 	refreshQueued = true
 	C_Timer.After(0, RunRefresh)
+end
+
+-- Training several ranks fires a burst of events: automatic update looks once the spellbook settles.
+local autoGeneration = 0
+
+local function QueueAutoUpdate()
+	if not DB.autoUpdate then return end
+	autoGeneration = autoGeneration + 1
+	local generation = autoGeneration
+	C_Timer.After(AUTO_UPDATE_DELAY, function()
+		if generation == autoGeneration then ns.AutoUpdate() end
+	end)
 end
 
 --------------------------------------------------------------------------------
@@ -70,6 +91,8 @@ for _, e in ipairs({
 	"SPELLS_CHANGED",
 	"LEARNED_SPELL_IN_SKILL_LINE",
 	"ACTIVE_TALENT_GROUP_CHANGED",
+	"SPELL_TEXT_UPDATE",
+	"SPELL_DATA_LOAD_RESULT",
 	"ACTIONBAR_SLOT_CHANGED",
 	"ACTIONBAR_PAGE_CHANGED",
 	"UPDATE_BONUS_ACTIONBAR",
@@ -82,7 +105,7 @@ for _, e in ipairs({
 	pcall(f.RegisterEvent, f, e)
 end
 
-f:SetScript("OnEvent", function(_, event, arg1)
+f:SetScript("OnEvent", function(_, event, arg1, arg2)
 	if event == "ADDON_LOADED" then
 		if arg1 ~= ADDON then return end
 		ns.loadedFromDisk = MaxRankCharDB ~= nil
@@ -113,6 +136,15 @@ f:SetScript("OnEvent", function(_, event, arg1)
 		or event == "PLAYER_LOGIN" or event == "PLAYER_ENTERING_WORLD" then
 		ns.MarkSpellbookDirty()
 		ns.RequestRefresh()
+		QueueAutoUpdate()
+	elseif event == "SPELL_TEXT_UPDATE" or event == "SPELL_DATA_LOAD_RESULT" then
+		if ns.OnSpellLoaded(event, arg1, arg2) then
+			if not ns.IsRequestingSpell() then
+				ns.MarkSpellbookDirty()
+			end
+			ns.RequestRefresh(true)
+			QueueAutoUpdate()	-- the rank text of a rank learned a moment ago can arrive late
+		end
 	elseif event == "PLAYER_REGEN_DISABLED" then
 		-- Click catchers would block casting with the mouse in combat.
 		if ns.IsPickMode() then
@@ -121,9 +153,11 @@ f:SetScript("OnEvent", function(_, event, arg1)
 		end
 	elseif event == "PLAYER_REGEN_ENABLED" then
 		if ns.pendingUpgrade then
+			local auto = ns.pendingUpgrade == "auto"
 			ns.pendingUpgrade = false
-			C_Timer.After(UPGRADE_AFTER_COMBAT_DELAY, ns.UpgradeAll)
+			C_Timer.After(UPGRADE_AFTER_COMBAT_DELAY, function() ns.UpgradeAll(auto) end)
 		end
+		QueueAutoUpdate()	-- ranks learned during the fight
 		ns.RequestRefresh()
 	else
 		ns.RequestRefresh()
@@ -136,6 +170,7 @@ end)
 
 local HELP = {
 	"/maxrank update - upgrade outdated spells on your action bars",
+	"/maxrank auto on|off - update by itself each time you learn a new rank",
 	"/maxrank scan - list outdated spells without changing anything",
 	"/maxrank ignore - toggle ignore mode (click a spell on a bar to keep that exact rank)",
 	"/maxrank highlight - toggle the glow on outdated spells",
@@ -156,6 +191,10 @@ SlashCmdList.MAXRANK = function(input)
 	cmd, arg = cmd:lower(), arg:lower()
 	if cmd == "update" then
 		ns.UpgradeAll()
+	elseif cmd == "auto" then
+		local on = not DB.autoUpdate
+		if arg == "on" then on = true elseif arg == "off" then on = false end
+		ns.SetAutoUpdate(on)
 	elseif cmd == "scan" then
 		ns.PrintScan()
 	elseif cmd == "ignore" then

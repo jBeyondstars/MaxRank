@@ -65,7 +65,7 @@ local function GetButtons()
 end
 
 local function ButtonSlot(button)
-	local slot = button.action
+	local slot = ns.Val(button.action)
 	if type(slot) == "number" and slot > 0 and slot <= MAX_ACTION_SLOT then return slot end
 	return nil
 end
@@ -435,7 +435,7 @@ function ns.RefreshOverlays()
 		end
 		local c = catchers[button]
 		if c then
-			c:SetShown(pickMode and slot ~= nil and HasAction(slot))
+			c:SetShown(pickMode and slot ~= nil and ns.Val(HasAction(slot)) and true or false)
 		end
 	end
 end
