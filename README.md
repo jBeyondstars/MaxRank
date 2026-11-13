@@ -6,7 +6,7 @@ On Forever, learning a new rank does not change the buttons that still hold the 
 
 <img src="docs/assets/spellbook-buttons.webp" alt="The MaxRank buttons in the spellbook footer" width="600">
 
-The buttons sit in the spellbook footer, left of the page arrows: **Auto**, and **...**, which opens a menu with Ignore ranks and Highlight. An **Update** button joins them whenever a spell on your action bars is outdated.
+The buttons sit in the spellbook footer, left of the page arrows: **Update**, **Auto**, and **...**, which opens a menu with Ignore ranks and Highlight.
 
 ## Features
 
@@ -14,7 +14,7 @@ The buttons sit in the spellbook footer, left of the page arrows: **Auto**, and 
 
 Replaces every spell on your action bars that is below the highest rank you know. It covers every bar and page, including stance and form pages you are not in. Macros, items and empty slots are never touched, and a spell is never downgraded.
 
-The button only shows while there is something to update. It says how many slots it will change, for example *Update (3)*, and its tooltip lists them:
+The button says how many slots it will change, for example *Update (3)*, and is greyed out when there is nothing to do. With Auto on, it only shows while something is left to update. Its tooltip lists the changes:
 
 ![Update tooltip listing Holy Light (Rank 1) -> Rank 2](docs/assets/update-tooltip.png)
 

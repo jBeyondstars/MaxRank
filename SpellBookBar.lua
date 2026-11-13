@@ -3,8 +3,8 @@
 -- The strip is a child of PlayerSpellsFrame.SpellBookFrame, so it only shows on the Spellbook tab.
 -- It sits left of the page controls: under the frame it would cover the action bars.
 -- The spellbook can be narrow and the strip grows to the left, towards the edge of the page, so
--- it stays short: Update only shows while a spell is outdated, and Ignore and Highlight share the
--- ... button, which opens a menu.
+-- it stays short: with Auto on, Update only shows while a spell is outdated, and Ignore and
+-- Highlight share the ... button, which opens a menu.
 
 local ADDON, ns = ...
 
@@ -132,6 +132,7 @@ function ns.AttachSpellBook()
 		ShowTooltip(self, UPDATE_TITLE, UPDATE_TEXT, ns.DescribePending)
 	end)
 	updateButton:SetPoint("RIGHT", autoButton, "LEFT", -GAP, 0)
+	updateButton:SetMotionScriptsWhileDisabled(true)	-- greyed out, its tooltip still says why
 
 	-- Closing the spellbook ends Highlight and ignore mode. Checked a frame later: minimizing or
 	-- maximizing the book hides it and shows it again in the same pass.
@@ -151,19 +152,22 @@ function ns.RefreshSpellBookBar()
 	bar:SetShown(wanted)
 	if not wanted or not bar:IsVisible() then return end
 
-	-- Update is only there while something is outdated: its showing up is the reminder.
+	-- Update. With Auto off it is always there, greyed out when everything is up to date. With
+	-- Auto on it only shows up for what the automatic update left behind.
 	local outdated = ns.ScanBars()
 	local n = #outdated
-	updateButton:SetText(("Update (%d)"):format(n))
-	if n == 0 and GameTooltip:IsOwned(updateButton) then GameTooltip:Hide() end
-	updateButton:SetShown(n > 0)
+	local auto = ns.GetDB().autoUpdate
+	local showUpdate = n > 0 or not auto
+	updateButton:SetText(n > 0 and ("Update (%d)"):format(n) or "Update")
+	updateButton:SetEnabled(n > 0)
+	if not showUpdate and GameTooltip:IsOwned(updateButton) then GameTooltip:Hide() end
+	updateButton:SetShown(showUpdate)
 
 	-- Done leaves ignore mode.
 	local picking = ns.IsPickMode()
 	menuButton:SetText(picking and "Done" or HasMenu() and "..." or "Ignore")
 	if picking or ns.IsHighlight() then menuButton:LockHighlight() else menuButton:UnlockHighlight() end
 
-	local auto = ns.GetDB().autoUpdate
 	autoButton:SetText(auto and "Auto: On" or "Auto")
 	if auto then autoButton:LockHighlight() else autoButton:UnlockHighlight() end
 end

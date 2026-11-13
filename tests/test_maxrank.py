@@ -422,20 +422,40 @@ class MaxRankTests(unittest.TestCase):
         button = self.g.MaxRankMenuButton
         button.scripts.OnClick(button, "LeftButton")
 
-    def test_update_button_only_shows_while_something_is_outdated(self):
+    def test_update_button_stays_greyed_out_when_auto_is_off(self):
         self.lua.execute("LoadSpellBook()")
         button = self.g.MaxRankUpdateButton
         self.assertTrue(button.shown)
+        self.assertTrue(button.enabled)
         self.assertEqual(button.text, "Update (6)")
         button.scripts.OnEnter(button)            # the tooltip lists the changes; it must build without error
         button.scripts.OnClick(button, "LeftButton")
         self.lua.execute("RunTimers()")
         self.assertEqual(self.slot(1), 9473)
-        self.assertFalse(button.shown)            # nothing left to update
-        # A low rank dragged back onto a bar brings the button back.
-        self.lua.execute("ACTIONS[1] = { 'spell', 2061 }; FireEvent('ACTIONBAR_SLOT_CHANGED', 1); RunTimers()")
+        # Nothing left to update: still there, greyed out, and its tooltip says so.
         self.assertTrue(button.shown)
+        self.assertFalse(button.enabled)
+        self.assertEqual(button.text, "Update")
+        button.scripts.OnEnter(button)
+        # A low rank dragged back onto a bar wakes it up.
+        self.lua.execute("ACTIONS[1] = { 'spell', 2061 }; FireEvent('ACTIONBAR_SLOT_CHANGED', 1); RunTimers()")
+        self.assertTrue(button.enabled)
         self.assertEqual(button.text, "Update (1)")
+
+    def test_update_button_only_shows_for_leftovers_when_auto_is_on(self):
+        self.lua.execute("LoadSpellBook()")
+        button = self.g.MaxRankUpdateButton
+        self.ns.SetAutoUpdate(True)
+        self.lua.execute("RunTimers()")
+        self.assertTrue(button.shown)             # turning Auto on updates nothing: 6 slots are still outdated
+        self.assertEqual(button.text, "Update (6)")
+        button.scripts.OnClick(button, "LeftButton")
+        self.lua.execute("RunTimers()")
+        self.assertFalse(button.shown)            # nothing left: Auto takes care of the next ranks
+        self.ns.SetAutoUpdate(False)
+        self.lua.execute("RunTimers()")
+        self.assertTrue(button.shown)             # back to the manual button, greyed out
+        self.assertFalse(button.enabled)
 
     def test_menu_button_holds_ignore_and_highlight(self):
         self.lua.execute("LoadSpellBook()")

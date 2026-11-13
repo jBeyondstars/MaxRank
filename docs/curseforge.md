@@ -22,7 +22,7 @@ In Forever, learning a new rank at your trainer doesn't change your action bars:
 
 Press **P**. The MaxRank buttons sit at the bottom of the spellbook, next to the page arrows:
 
-- **Update** only shows up when a spell on your bars is outdated.
+- **Update** upgrades your bars. It is greyed out when everything is up to date.
 - **Auto** turns the automatic update on or off.
 - **...** opens a small menu with **Ignore ranks** and **Highlight**.
 
@@ -49,11 +49,11 @@ No risk of casting by mistake: while Ignore mode is on, clicking a button never 
 
 ### 4. Upgrade everything else: Update
 
-As soon as something is outdated, the **Update** button shows up with the number of buttons it will change, for example *Update (3)*. Hover over it to see the list, then click it.
+The **Update** button shows how many buttons it will change, for example *Update (3)*. Hover over it to see the list, then click it.
 
 ![The Update tooltip listing the changes](https://raw.githubusercontent.com/jBeyondstars/MaxRank/main/docs/assets/update-tooltip.png)
 
-Each change is printed in your chat, like *Holy Light (Rank 1) -> Rank 2*. When everything is up to date, the button goes away.
+Each change is printed in your chat, like *Holy Light (Rank 1) -> Rank 2*. When everything is up to date, the button greys out.
 
 **Tip:** after each visit to your class trainer, open your spellbook and click **Update**. Or let MaxRank do it for you, see below.
 
@@ -61,7 +61,7 @@ Each change is printed in your chat, like *Holy Light (Rank 1) -> Rank 2*. When 
 
 Click **Auto**. The button reads *Auto: On*, and from then on MaxRank runs Update by itself each time you learn a new rank, from a trainer, a tome or a quest. Your ignored ranks are still left alone.
 
-Turning Auto on changes nothing right away: click **Update** once for what is already outdated. Click **Auto** again to turn it off.
+Turning Auto on changes nothing right away: click **Update** once for what is already outdated. After that the Update button stays out of the way, and only comes back if something is left to update. Click **Auto** again to turn it off.
 
 ## Slash commands
 
