@@ -11,6 +11,9 @@ local BANK = Enum.SpellBookSpellBank.Player
 local SPELL_ITEM = Enum.SpellBookItemType.Spell
 local RESCAN_DELAY = 0.2		-- seconds before checking what an update left behind
 local MAX_LISTED = 10			-- pending changes listed in the Update tooltip
+local MAX_CHAT_LISTED = 4		-- changes named in the single line an automatic update prints
+local SPEC_SETTLE = 1			-- quiet time on the bars and spellbook after a spec switch before anything is placed
+local SPEC_SETTLE_MAX = 10		-- longest wait for that quiet time
 local AUTO_SETTLE = 5			-- seconds after a rank is learned during which automatic update keeps looking
 local AUTO_RETRY_DELAY = 1		-- seconds between automatic tries while the cursor is busy
 local AUTO_RETRIES = 30
@@ -345,6 +348,59 @@ function ns.DescribePending(tooltip)
 end
 
 --------------------------------------------------------------------------------
+-- Dual spec
+--
+-- Each spec has its own action bars and only the active spec's bars can be read or changed, so a
+-- rank learned in one spec leaves the other spec's bars behind. DB.rankSerial counts the new ranks
+-- automatic update has seen and DB.specSeen[spec] the count when that spec's bars were last updated:
+-- a spec that is behind gets caught up when you switch to it. While a switch swaps the bars nothing
+-- is placed: a button changed then could land on the other spec's bar.
+--------------------------------------------------------------------------------
+
+local settling = false			-- a spec switch is swapping the bars
+local settleStart, lastChange = 0, 0
+local lastSpecKey				-- active spec at the previous look, to notice a switch without a spec event
+local manualAfterSwitch = false	-- Update was clicked while the bars were swapping
+
+local function SafeCall(fn)
+	if type(fn) ~= "function" then return nil end
+	local ok, v = pcall(fn)
+	if ok then return Val(v) end
+	return nil
+end
+
+-- Talent group (dual spec) and specialization, with whichever API the client has.
+local function ActiveSpec()
+	local info = C_SpecializationInfo
+	local group = SafeCall(info and info.GetActiveSpecGroup) or SafeCall(GetActiveSpecGroup) or SafeCall(GetActiveTalentGroup)
+	local spec = SafeCall(info and info.GetSpecialization) or SafeCall(GetSpecialization)
+	return group, spec
+end
+
+local function SpecKey()
+	local group, spec = ActiveSpec()
+	if not group and not spec then return nil end
+	return tostring(group or 0) .. ":" .. tostring(spec or 0)
+end
+
+local function MarkSpecCurrent()
+	local key = SpecKey()
+	if key then
+		local db = ns.GetDB()
+		db.specSeen[key] = db.rankSerial
+	end
+end
+
+-- True when a rank was learned since the active spec's bars were last updated. Without a spec API
+-- every switch counts as behind once a rank has been learned.
+local function SpecBehind()
+	local db = ns.GetDB()
+	if db.rankSerial == 0 then return false end
+	local key = SpecKey()
+	return not key or (db.specSeen[key] or 0) < db.rankSerial
+end
+
+--------------------------------------------------------------------------------
 -- Upgrade
 --------------------------------------------------------------------------------
 
@@ -403,8 +459,29 @@ local function RetryWhenCursorFree(tries)
 	end)
 end
 
--- auto: started by automatic update, which only speaks when it changes something.
-function ns.UpgradeAll(auto)
+-- "Fade (Rank 4) -> Rank 5, Flash Heal (Rank 5) -> Rank 6", for the one line of an automatic update.
+local function DescribeChanges(order)
+	local parts = {}
+	for i, g in ipairs(order) do
+		if i > MAX_CHAT_LISTED then
+			parts[#parts + 1] = ("and %d more"):format(#order - MAX_CHAT_LISTED)
+			break
+		end
+		parts[#parts + 1] = ("%s -> %s"):format(ns.SpellLabel(g.from), RankLabel(g.to))
+	end
+	return table.concat(parts, ", ")
+end
+
+-- auto: started by automatic update, which only speaks when it changes something, in one line.
+-- spec: automatic catch-up of the bars of the spec you just switched to.
+function ns.UpgradeAll(auto, spec)
+	if settling then
+		if not auto then
+			manualAfterSwitch = true
+			ns.Print("Your action bars are still changing after the spec switch. The update will run in a moment.")
+		end
+		return	-- automatic update looks again when the switch settles
+	end
 	if InCombatLockdown() then
 		if auto then
 			ns.pendingUpgrade = ns.pendingUpgrade or "auto"
@@ -425,6 +502,7 @@ function ns.UpgradeAll(auto)
 	end
 	BuildRankMap()	-- always start from a fresh read of the spellbook
 	local outdated, ignored = ns.ScanBars()
+	MarkSpecCurrent()	-- this spec's bars have now seen every rank learned so far
 	if #outdated == 0 then
 		if not auto then
 			ns.Print("All action bar spells are already at their highest known rank" .. IgnoredSuffix(ignored) .. ".")
@@ -438,20 +516,36 @@ function ns.UpgradeAll(auto)
 		ns.Print("|cffff4040the client refused to change an action slot:|r " .. tostring(placed))
 		return
 	end
-	if auto and placed == 0 then return end
+
+	if auto then
+		-- Never asks the player to try again: what is left shows on the Update button.
+		if placed > 0 then
+			ns.Print(("Updated %d button%s%s: %s."):format(placed, Plural(placed),
+				spec and " on this spec's bars" or "", DescribeChanges(order)))
+		end
+		C_Timer.After(RESCAN_DELAY, function() ns.RequestRefresh() end)
+		return
+	end
+
 	for _, g in ipairs(order) do
 		ns.Print(("%s -> %s (%d button%s)"):format(ns.SpellLabel(g.from), RankLabel(g.to), g.count, Plural(g.count)))
 	end
-	ns.Print(((auto and "Automatically updated" or "Updated") .. " %d action slot%s to the highest known rank%s."):format(
-		placed, Plural(placed), IgnoredSuffix(ignored)))
+	ns.Print(("Updated %d action slot%s to the highest known rank%s."):format(placed, Plural(placed), IgnoredSuffix(ignored)))
 
-	-- A slot may refuse the change (for example on a form page); say what is left.
+	-- A slot may refuse the change (for example on a form page): count the slots that still hold the
+	-- rank they had. Slots outdated by something else in the meantime (a rank learned a moment ago,
+	-- bars swapped by a spec switch) are not refusals.
 	C_Timer.After(RESCAN_DELAY, function()
-		local left = ns.ScanBars()
-		if #left > 0 then
-			ns.Print(("|cffffd040%d action slot%s could not be updated.|r Switch to that form or stance and try again."):format(#left, Plural(#left)))
-		end
 		ns.RequestRefresh()
+		if settling then return end
+		local left = 0
+		for _, info in ipairs(outdated) do
+			local _, id = GetActionInfo(info.slot)
+			if Val(id) == info.spellID then left = left + 1 end
+		end
+		if left > 0 then
+			ns.Print(("|cffffd040%d action slot%s could not be updated.|r Switch to that form or stance and try again."):format(left, Plural(left)))
+		end
 	end)
 end
 
@@ -477,12 +571,17 @@ end
 
 -- Runs a moment after the spellbook changed or a rank text loaded.
 function ns.AutoUpdate()
-	if not ns.GetDB().autoUpdate then
+	local db = ns.GetDB()
+	if not db.autoUpdate then
 		known, learnedAt = nil, nil
 		return
 	end
-	if InCombatLockdown() then return end	-- looked at again when combat ends
-	if LearnedSpell() then learnedAt = GetTime() end
+	-- Looked at again when the spec switch settles or when combat ends.
+	if settling or InCombatLockdown() then return end
+	if LearnedSpell() then
+		learnedAt = GetTime()
+		db.rankSerial = db.rankSerial + 1	-- the other spec's bars are behind from now on
+	end
 	-- A new rank can show up before its rank text: keep looking for a few seconds.
 	if learnedAt and GetTime() - learnedAt <= AUTO_SETTLE then
 		ns.UpgradeAll(true)
@@ -490,7 +589,11 @@ function ns.AutoUpdate()
 end
 
 function ns.SetAutoUpdate(on)
-	ns.GetDB().autoUpdate = on and true or false
+	local db = ns.GetDB()
+	db.autoUpdate = on and true or false
+	-- Nothing changes when it is turned on, on this spec or the other one.
+	db.rankSerial = 0
+	wipe(db.specSeen)
 	known, learnedAt = nil, nil
 	if on then
 		ns.AutoUpdate()	-- records the spellbook as it is now
@@ -499,6 +602,58 @@ function ns.SetAutoUpdate(on)
 		ns.Print("Automatic update off.")
 	end
 	ns.RequestRefresh()
+end
+
+--------------------------------------------------------------------------------
+-- Spec switch: wait for the bars to settle, then catch them up
+--------------------------------------------------------------------------------
+
+local function FinishSwitch()
+	settling = false
+	local db = ns.GetDB()
+	if db.autoUpdate then
+		-- The new spec's talent spells are not newly learned ranks: only record the spellbook.
+		LearnedSpell()
+	end
+	if manualAfterSwitch then
+		manualAfterSwitch = false
+		ns.UpgradeAll()
+	elseif db.autoUpdate and SpecBehind() then
+		ns.UpgradeAll(true, true)
+	end
+	ns.RequestRefresh()
+end
+
+local function CheckSettled()
+	local now = GetTime()
+	local quiet = now - lastChange
+	if quiet >= SPEC_SETTLE or now - settleStart >= SPEC_SETTLE_MAX then
+		FinishSwitch()
+	else
+		C_Timer.After(SPEC_SETTLE - quiet, CheckSettled)
+	end
+end
+
+-- The active spec changed (or the client says it may have): the bars are being swapped.
+function ns.OnSpecSwitch()
+	local now = GetTime()
+	lastChange = now
+	lastSpecKey = SpecKey() or lastSpecKey
+	if settling then return end
+	settling, settleStart = true, now
+	C_Timer.After(SPEC_SETTLE, CheckSettled)
+end
+
+-- The bars or the spellbook changed: a switch in progress is not over yet, or a switch just started
+-- and the client fired no spec event for it (the spec API says the active spec changed).
+function ns.NoteSwitchActivity()
+	local key = SpecKey()
+	if key and lastSpecKey and key ~= lastSpecKey then
+		ns.OnSpecSwitch()
+		return
+	end
+	lastSpecKey = key or lastSpecKey
+	if settling then lastChange = GetTime() end
 end
 
 function ns.PrintScan()
@@ -570,6 +725,12 @@ function ns.PrintStatus()
 	ns.Print(("version %s, saved data %s, session %d."):format(ns.VERSION, ns.loadedFromDisk and "loaded from disk" or "new", db.sessions))
 	ns.Print(("%d spellbook spells read, %d action slot%s to update%s."):format(mapSize, #outdated, Plural(#outdated), IgnoredSuffix(ignored)))
 	ns.Print("Automatic update is " .. (db.autoUpdate and "on." or "off."))
+	local group, spec = ActiveSpec()
+	if group or spec then
+		ns.Print(("Active spec: talent group %s, specialization %s."):format(tostring(group or "-"), tostring(spec or "-")))
+	else
+		ns.Print("Active spec: not reported by this client, every spec switch is checked.")
+	end
 	if #names > 0 then
 		ns.Print("Left alone (several spells share the name): " .. table.concat(names, ", "))
 	end

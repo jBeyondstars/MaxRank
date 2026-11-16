@@ -15,6 +15,15 @@ local defaults = {
 	showBar = true,		-- buttons under the spellbook
 	autoUpdate = false,	-- update the action bars by itself when a new rank is learned
 	sessions = 0,		-- load counter, shows in /maxrank status whether saved data survives a restart
+	rankSerial = 0,		-- new ranks automatic update has seen, for the dual spec catch-up
+	specSeen = {},		-- [spec] = rankSerial when that spec's action bars were last updated
+}
+
+-- Dual spec: the server swaps every action bar for the new spec's.
+local SPEC_EVENTS = {
+	ACTIVE_TALENT_GROUP_CHANGED = true,
+	ACTIVE_PLAYER_SPECIALIZATION_CHANGED = true,
+	PLAYER_SPECIALIZATION_CHANGED = true,
 }
 
 local DB
@@ -91,6 +100,8 @@ for _, e in ipairs({
 	"SPELLS_CHANGED",
 	"LEARNED_SPELL_IN_SKILL_LINE",
 	"ACTIVE_TALENT_GROUP_CHANGED",
+	"ACTIVE_PLAYER_SPECIALIZATION_CHANGED",
+	"PLAYER_SPECIALIZATION_CHANGED",
 	"SPELL_TEXT_UPDATE",
 	"SPELL_DATA_LOAD_RESULT",
 	"ACTIONBAR_SLOT_CHANGED",
@@ -132,8 +143,16 @@ f:SetScript("OnEvent", function(_, event, arg1, arg2)
 		return
 	end
 
-	if event == "SPELLS_CHANGED" or event == "LEARNED_SPELL_IN_SKILL_LINE" or event == "ACTIVE_TALENT_GROUP_CHANGED"
+	if SPEC_EVENTS[event] then
+		if event == "PLAYER_SPECIALIZATION_CHANGED" and arg1 ~= "player" then return end
+		-- Nothing is placed until the bars settle: a change could land on the other spec's bar.
+		ns.OnSpecSwitch()
+		ns.MarkSpellbookDirty()
+		ns.RequestRefresh()
+		QueueAutoUpdate()
+	elseif event == "SPELLS_CHANGED" or event == "LEARNED_SPELL_IN_SKILL_LINE"
 		or event == "PLAYER_LOGIN" or event == "PLAYER_ENTERING_WORLD" then
+		ns.NoteSwitchActivity()
 		ns.MarkSpellbookDirty()
 		ns.RequestRefresh()
 		QueueAutoUpdate()
@@ -160,6 +179,7 @@ f:SetScript("OnEvent", function(_, event, arg1, arg2)
 		QueueAutoUpdate()	-- ranks learned during the fight
 		ns.RequestRefresh()
 	else
+		ns.NoteSwitchActivity()	-- action bar events: a spec switch may still be swapping them
 		ns.RequestRefresh()
 	end
 end)

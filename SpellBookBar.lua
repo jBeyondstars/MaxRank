@@ -124,7 +124,7 @@ function ns.AttachSpellBook()
 
 	autoButton = MakeButton("MaxRankAutoButton", "Auto", AUTO_WIDTH, function() ns.SetAutoUpdate(not ns.GetDB().autoUpdate) end, function(self)
 		ShowTooltip(self, "Automatic update",
-			"Runs Update by itself each time you learn a new rank. Ignored ranks are still left alone. Nothing changes when you turn it on: click Update for what is already outdated.")
+			"Runs Update by itself each time you learn a new rank. With dual spec, the other spec's bars are updated when you switch to it. Ignored ranks are still left alone. Nothing changes when you turn it on: click Update for what is already outdated.")
 	end)
 	autoButton:SetPoint("RIGHT", menuButton, "LEFT", -GAP, 0)
 

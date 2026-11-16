@@ -10,7 +10,7 @@ In Forever, learning a new rank at your trainer doesn't change your action bars:
 ## Features
 
 - **Update**: replaces every outdated spell on your action bars with the highest rank you know. Every bar and every page, including stance and form bars you aren't in right now.
-- **Auto**: turn it on and Update runs by itself each time you learn a new rank.
+- **Auto**: turn it on and Update runs by itself each time you learn a new rank, on both specs if you use dual spec.
 - **Ignore**: keep a specific rank on purpose, like *Flash Heal (Rank 1)* for cheap heals. Ignored ranks are never touched, on any bar.
 - **Highlight**: outdated spells glow gold on your bars, ignored ones show a padlock.
 - **Safe**: never downgrades a spell, never touches macros or items, never changes your bars in combat.
@@ -62,6 +62,8 @@ Each change is printed in your chat, like *Holy Light (Rank 1) -> Rank 2*. When 
 Click **Auto**. The button reads *Auto: On*, and from then on MaxRank runs Update by itself each time you learn a new rank, from a trainer, a tome or a quest. Your ignored ranks are still left alone.
 
 Turning Auto on changes nothing right away: click **Update** once for what is already outdated. After that the Update button stays out of the way, and only comes back if something is left to update. Click **Auto** again to turn it off.
+
+Using dual spec? Each spec has its own action bars, so a rank learned in one spec can't reach the other spec's bars yet. MaxRank remembers it and updates them as soon as you switch to that spec.
 
 ## Slash commands
 

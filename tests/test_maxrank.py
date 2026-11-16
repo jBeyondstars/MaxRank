@@ -38,7 +38,8 @@ for _, e in ipairs({ "ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "S
 	"LEARNED_SPELL_IN_SKILL_LINE", "SPELL_TEXT_UPDATE", "SPELL_DATA_LOAD_RESULT",
 	"ACTIONBAR_SLOT_CHANGED", "ACTIONBAR_PAGE_CHANGED", "UPDATE_BONUS_ACTIONBAR",
 	"UPDATE_SHAPESHIFT_FORM", "UPDATE_VEHICLE_ACTIONBAR", "UPDATE_OVERRIDE_ACTIONBAR",
-	"PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED" }) do KNOWN_EVENTS[e] = true end
+	"PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
+	"PLAYER_SPECIALIZATION_CHANGED", "ACTIVE_PLAYER_SPECIALIZATION_CHANGED" }) do KNOWN_EVENTS[e] = true end
 
 CHAT = {}
 DEFAULT_CHAT_FRAME = { AddMessage = function(_, msg) CHAT[#CHAT + 1] = msg end }
@@ -275,6 +276,23 @@ function LearnFlashHeal4()
 	BOOK[3].low = true
 	BOOK[4].itemType = nil
 	FireEvent("SPELLS_CHANGED")
+end
+"""
+
+# Dual spec: each spec has its own action bars, only the active spec's are visible.
+DUAL_SPEC = r"""
+SPEC_GROUP = 1
+C_SpecializationInfo = { GetActiveSpecGroup = function() return SPEC_GROUP end }
+-- The second spec's bars: Flash Heal ranks 1 and 3, and a Renew of its own.
+SPEC_BARS = { [2] = { [1] = { "spell", 2061 }, [3] = { "spell", 9473 }, [20] = { "spell", 139 } } }
+-- Server side of a switch: the bars are swapped for the other spec's, then the events fire.
+function SwitchSpec(to, event)
+	SPEC_BARS[SPEC_GROUP] = ACTIONS
+	ACTIONS = SPEC_BARS[to]
+	SPEC_GROUP = to
+	if event then FireEvent(event, "player") end
+	FireEvent("SPELLS_CHANGED")
+	for slot in pairs(ACTIONS) do FireEvent("ACTIONBAR_SLOT_CHANGED", slot) end
 end
 """
 
@@ -545,8 +563,10 @@ class MaxRankTests(unittest.TestCase):
         self.assertEqual(self.slot(75), 9472)
         self.assertEqual(self.slot(8), 284)       # everything outdated is updated, like the Update button
         self.assertIsNone(self.g.CURSOR)
-        self.assertTrue(self.chat("Automatically updated 5 action slots"))
-        self.assertTrue(self.chat("(2 ignored)"))
+        # One line, and no "try again": what is left shows on the Update button.
+        self.assertEqual(self.g.CHAT[len(self.g.CHAT)], "|cffffc040MaxRank|r: Updated 5 buttons: Flash Heal (Rank 1) -> Rank 4, "
+                         "Flash Heal (Rank 3) -> Rank 4, Heroic Strike (Rank 1) -> Rank 2.")
+        self.assertFalse(self.chat("could not be updated"))
 
     def test_auto_update_only_runs_after_learning(self):
         self.g.SlashCmdList.MAXRANK("auto on")
@@ -605,6 +625,63 @@ class MaxRankTests(unittest.TestCase):
             RunTimers()
         """)
         self.assertEqual(self.slot(1), 9999)
+
+    def auto_on_with_dual_spec(self):
+        self.lua.execute(DUAL_SPEC)
+        self.g.SlashCmdList.MAXRANK("auto on")
+        self.lua.execute("RunTimers()")
+        self.learn_rank_4()                       # spec 1's bars are updated, spec 2's are behind
+        self.assertEqual(self.slot(1), 9474)
+
+    def test_dual_spec_catches_up_the_other_specs_bars_once_the_switch_settles(self):
+        self.auto_on_with_dual_spec()
+        placed = self.g.PLACED
+        self.lua.execute("CHAT = {}; NOW = 10; SwitchSpec(2, 'PLAYER_SPECIALIZATION_CHANGED'); RunQueuedTimers()")
+        self.assertEqual(self.g.PLACED, placed)   # nothing placed while the bars are being swapped
+        self.lua.execute("NOW = 12; RunTimers()")
+        self.assertEqual(self.slot(1), 9474)
+        self.assertEqual(self.slot(3), 9474)
+        self.assertEqual(self.slot(20), 139)
+        self.assertEqual(len(self.g.CHAT), 1)
+        self.assertTrue(self.chat("Updated 2 buttons on this spec's bars: Flash Heal (Rank 1) -> Rank 4, Flash Heal (Rank 3) -> Rank 4."))
+        # Back to spec 1, already up to date: nothing to do, nothing said.
+        self.lua.execute("CHAT = {}; NOW = 20; SwitchSpec(1, 'PLAYER_SPECIALIZATION_CHANGED'); NOW = 22; RunTimers()")
+        self.assertEqual(len(self.g.CHAT), 0)
+        self.assertEqual(self.lua.eval("SPEC_BARS[2][1][2]"), 9474)
+
+    def test_dual_spec_switch_noticed_without_a_spec_event(self):
+        self.auto_on_with_dual_spec()
+        placed = self.g.PLACED
+        self.lua.execute("NOW = 10; SwitchSpec(2); RunQueuedTimers()")
+        self.assertEqual(self.g.PLACED, placed)
+        self.lua.execute("NOW = 12; RunTimers()")
+        self.assertEqual(self.slot(1), 9474)
+
+    def test_dual_spec_manual_update_waits_for_the_bars(self):
+        self.lua.execute(DUAL_SPEC + "NOW = 10; SwitchSpec(2, 'PLAYER_SPECIALIZATION_CHANGED')")
+        self.ns.UpgradeAll()
+        self.assertEqual(self.g.PLACED, 0)
+        self.assertTrue(self.chat("still changing after the spec switch"))
+        self.lua.execute("NOW = 12; RunTimers()")
+        self.assertEqual(self.slot(1), 9473)      # rank 4 is not trained: rank 3 is the highest known
+        self.assertFalse(self.chat("could not be updated"))
+
+    def test_dual_spec_turning_auto_on_leaves_the_other_spec_alone(self):
+        self.lua.execute(DUAL_SPEC)
+        self.learn_rank_4()                       # auto off: both specs stay behind
+        self.g.SlashCmdList.MAXRANK("auto on")
+        self.lua.execute("RunTimers(); NOW = 10; SwitchSpec(2, 'PLAYER_SPECIALIZATION_CHANGED'); NOW = 12; RunTimers()")
+        self.assertEqual(self.g.PLACED, 0)
+        self.assertEqual(self.slot(1), 2061)
+
+    def test_manual_update_does_not_blame_slots_changed_by_something_else(self):
+        # Rank 4 is learned between the update and its check: slot 1 is outdated again but took the change.
+        self.ns.ToggleIgnoreSlot(2)
+        self.lua.execute("CHAT = {}")
+        self.ns.UpgradeAll()
+        self.lua.execute("LearnFlashHeal4(); RunTimers()")
+        self.assertEqual(self.slot(1), 9473)
+        self.assertFalse(self.chat("could not be updated"))
 
     def test_auto_button_toggles_and_shows_its_state(self):
         self.lua.execute("LoadSpellBook()")

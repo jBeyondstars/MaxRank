@@ -20,9 +20,11 @@ The button says how many slots it will change, for example *Update (3)*, and is 
 
 ### Auto
 
-Click Auto and MaxRank runs Update by itself each time you learn a new rank (trainer, tome, quest), and prints what it changed. The button then reads *Auto: On*. Click it again to turn it off. Ignored ranks are still left alone.
+Click Auto and MaxRank runs Update by itself each time you learn a new rank (trainer, tome, quest), and prints what it changed in one line. The button then reads *Auto: On*. Click it again to turn it off. Ignored ranks are still left alone.
 
 It is off by default and saved per character. Turning it on changes nothing by itself: click Update for what is already outdated.
+
+With dual spec, each spec has its own action bars and only the active spec's bars can be changed. MaxRank remembers which spec missed a new rank and updates its bars when you switch to it, once the switch has finished swapping the bars.
 
 ### Highlight
 
